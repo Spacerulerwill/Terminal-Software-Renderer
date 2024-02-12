@@ -39,10 +39,6 @@ struct Vertex {
 struct Texture {
 	Texture(const char* path) {
 		data = stbi_load(path, &width, &height, &numComponents, 0);
-		if (!data) {
-			stbi_image_free(data);
-			std::cout << fmt::format("Failed to load image {}", path);
-		}
 	}
 
 	iVec3 GetPixel(iVec2 pos) const {
@@ -162,8 +158,8 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 					(alpha * v0.color[2]) + (beta * v1.color[2]) + (gamma * v2.color[2])
 				};
 				iVec2 texelPos {
-					(alpha * v0.texPos[0] + beta * v1.texPos[0] + gamma * v2.texPos[0]) * texture.width,
-					(alpha * v0.texPos[1] + beta * v1.texPos[1] + gamma * v2.texPos[1]) * texture.height
+					static_cast<int>((alpha * v0.texPos[0] + beta * v1.texPos[0] + gamma * v2.texPos[0]) * (texture.width - 1)),
+					static_cast<int>((alpha * v0.texPos[1] + beta * v1.texPos[1] + gamma * v2.texPos[1]) * (texture.height - 1))
 				};
 				iVec3 texelColor = texture.GetPixel(texelPos);	
 				Vec3 finalColor {
