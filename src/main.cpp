@@ -2,10 +2,7 @@
 #include <vector>
 #include <string>
 #include <cstring>
-#include <sys/ioctl.h>
 #include <stdio.h>
-#include <unistd.h>
-#include <termios.h>
 #include <array>
 #include <fmt/format.h>
 #include <chrono>
@@ -13,11 +10,53 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#define WIPE_TERMINAL "\x1B[2J\x1B[H"
+struct Terminal {
+    unsigned int width;
+    unsigned int height;
+};
+
+#ifdef __linux__
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
+
+Terminal getTerminal() {
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    return Terminal{
+        .width = static_cast<unsigned int>(w.ws_col),
+        .height = stati_cast<unsigned int>(w.ws_row),
+    };
+}
+
+void MoveCursorToStart() {
+    std::cout << "\x1B[2J\x1B[H";
+}
+
 #define SWITCH_TO_ALT_TERMINAL "\u001B[?1049h" 
 #define RESTORE_TERMINAL "\u001B[?1049l" 
+#elif _WIN32
+#define NOMINMAX
+#include <Windows.h>
 
-const wchar_t onPixel = L'█';
+Terminal getTerminal() {
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    int columns, rows;
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+    columns = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+    rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    return Terminal{
+        .width = static_cast<unsigned int>(columns),
+        .height = static_cast<unsigned int>(rows),
+    };
+ }
+
+void MoveCursorToStart() {
+    static const HANDLE std_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    static const COORD top_left = { 0, 0 };
+    SetConsoleCursorPosition(std_handle, top_left);
+}
+#endif
 
 struct Pixel {
 	char colorCode[19];
@@ -108,19 +147,19 @@ bool is_top_left(Vec2 start, Vec2 end) {
 	return is_left_edge || is_top_edge;
 }
 
-void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, unsigned short rows, unsigned short cols) {
-	if (pos[0] < 0 || pos[0] >= cols || pos[1] < 0 || pos[1] >= rows) {
+void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, Terminal terminal) {
+	if (pos[0] < 0 || pos[0] >= terminal.width || pos[1] < 0 || pos[1] >= terminal.height) {
 		return;
 	}
-	std::size_t pxlIdx = (cols * pos[1]) + pos[0];
+	std::size_t pxlIdx = (terminal.width * pos[1]) + pos[0];
 	memcpy(pixels[pxlIdx].colorCode, colorCode.c_str(), 19);
 	pixels[pxlIdx].pixel = '+';
 }
 
-void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vertex v0, Vertex v1, Vertex v2, unsigned short rows, unsigned short cols) {	
-	Vec2 pos0 = ndsToPixelCoordinates(v0.pos, rows, cols); 
-	Vec2 pos1 = ndsToPixelCoordinates(v1.pos, rows, cols);
-	Vec2 pos2 = ndsToPixelCoordinates(v2.pos, rows, cols);
+void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vertex v0, Vertex v1, Vertex v2, Terminal terminal) {	
+	Vec2 pos0 = ndsToPixelCoordinates(v0.pos, terminal.height, terminal.width); 
+	Vec2 pos1 = ndsToPixelCoordinates(v1.pos, terminal.height, terminal.width);
+	Vec2 pos2 = ndsToPixelCoordinates(v2.pos, terminal.height, terminal.width);
 
 	// Finds the bounding= box with all candidate pixels
 	int x_min = floor(std::min(std::min(pos0[0], pos1[0]), pos2[0]));
@@ -188,7 +227,7 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 				};
 				
 				// Draw pixel
-				writePixel(pixels, iVec2{x, y}, getColorEscapeCode(finalColor),  rows, cols);
+				writePixel(pixels, iVec2{x, y}, getColorEscapeCode(finalColor), terminal);
 			}
 			w0 += delta_w0_col;
 			w1 += delta_w1_col;
@@ -206,12 +245,13 @@ int main() {
 	stbi_set_flip_vertically_on_load(1);
 
 	// switch to alternative terminal
-	std::cout << SWITCH_TO_ALT_TERMINAL << WIPE_TERMINAL;
-
+#ifdef __linux__
+    std::cout << SWITCH_TO_ALT_TERMINAL;
+#endif 
+    MoveCursorToStart();
 	// get terminal dimensions
-	struct winsize w;
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-	std::size_t pixelCount = w.ws_col * w.ws_row;
+    Terminal terminal = getTerminal();
+	std::size_t pixelCount = terminal.width * terminal.height;
 	
 	// Our vertices - anticlockwise winding order
 	std::array vertices = {
@@ -262,7 +302,7 @@ int main() {
 
 		// run frame
 		// create a pixel buffer
-		std::cout << WIPE_TERMINAL << std::endl;
+        MoveCursorToStart();
 		std::vector<Pixel> pixels(pixelCount);
 		for (std::size_t i = 0; i < pixelCount; i++) {
 			char color[19] = {'\x1b', '[', '3', '8', ';', '2', ';', '2', '5', '5', ';', '2', '5', '5', ';', '2', '5', '5', 'm'};
@@ -276,8 +316,8 @@ int main() {
 		}
 	 	
 		// rasterize triangles
-		rasterize_triangle(texture, pixels, vertices[0], vertices[1], vertices[2], w.ws_row, w.ws_col);
-		rasterize_triangle(texture, pixels, vertices[3], vertices[2], vertices[1], w.ws_row, w.ws_col);	
+		rasterize_triangle(texture, pixels, vertices[0], vertices[1], vertices[2], terminal);
+		rasterize_triangle(texture, pixels, vertices[3], vertices[2], vertices[1], terminal);	
 
 		// print
 		std::vector<char> temp(sizeof(Pixel) * pixels.size() + 1);
@@ -286,7 +326,9 @@ int main() {
 		std::cout << temp.data();
     }
 
+#ifdef __linux__
 	// restore the previous terminal
 	std::cout << RESTORE_TERMINAL;	
+#endif 
 	return 0;
 }
