@@ -58,10 +58,10 @@ struct Texture {
 	int numComponents;
 };
 
-iVec2 ndsToPixelCoordinates(Vec2 nds, unsigned short rows,  unsigned short cols) {
-	return iVec2 {
-		static_cast<int>((nds[0] + 1.0f) * 0.5f * (cols - 1)),
-		static_cast<int>((1.0f - nds[1]) * 0.5f * (rows - 1))
+Vec2 ndsToPixelCoordinates(Vec2 nds, unsigned short rows,  unsigned short cols) {
+	return Vec2 {
+		round((nds[0] + 1.0f) * 0.5f * (cols - 1)),
+		round((1.0f - nds[1]) * 0.5f * (rows - 1))
 	};
 }
 
@@ -88,93 +88,113 @@ std::string getColorEscapeCode(Vec3 color) {
 
 std::string getColorEscapeCode(iVec3 color) {
 	return fmt::format(
-		"\x1b[38;2;{:03d};{:03d};{:03d}m",
+		"\x1b[38;2;{:03d};{:03d};{:03d}m",		
 		color[0],
 		color[1],
 		color[2]
 	);
 }
 
-int edge_cross(iVec2 a, iVec2 b, iVec2 p) {
-	iVec2 ab {b[0] - a[0], b[1] - a[1]};
-	iVec2 ap {p[0] - a[0], p[1] - a[1]};
+float edge_cross(Vec2 a, Vec2 b, Vec2 p) {
+	Vec2 ab = { b[0] - a[0], b[1] - a[1] };
+	Vec2 ap = { p[0] - a[0], p[1] - a[1] };
 	return ab[0] * ap[1] - ab[1] * ap[0];
 }
 
-bool is_flat_top_or_left_edge(iVec2 start, iVec2 end) {
-	iVec2 edge {end[0] - start[0], end[1] - start[1]};
-	bool is_flat_top = edge[1] == 0 && edge[0] > 0;
+bool is_top_left(Vec2 start, Vec2 end) {
+	Vec2 edge = { end[0] - start[0], end[1] - start[1] };
+	bool is_top_edge = edge[1] == 0 && edge[0] > 0;
 	bool is_left_edge = edge[1] < 0;
-
-	return is_flat_top || is_left_edge;
+	return is_left_edge || is_top_edge;
 }
 
-void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vertex v0, Vertex v1, Vertex v2, unsigned short rows, unsigned short cols) {
-	iVec2 pos0 = ndsToPixelCoordinates(v0.pos, rows, cols);
-	iVec2 pos1 = ndsToPixelCoordinates(v1.pos, rows, cols);
-	iVec2 pos2 = ndsToPixelCoordinates(v2.pos, rows, cols);
+void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, unsigned short rows, unsigned short cols) {
+	if (pos[0] < 0 || pos[0] >= cols || pos[1] < 0 || pos[1] >= rows) {
+		return;
+	}
+	std::size_t pxlIdx = (cols * pos[1]) + pos[0];
+	memcpy(pixels[pxlIdx].colorCode, colorCode.c_str(), 19);
+	pixels[pxlIdx].pixel = '+';
+}
 
-	int delta_w0_col = pos0[1] - pos1[1];
-	int delta_w1_col = pos1[1] - pos2[1];
-	int delta_w2_col = pos2[1] - pos0[1];
+void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vertex v0, Vertex v1, Vertex v2, unsigned short rows, unsigned short cols) {	
+	Vec2 pos0 = ndsToPixelCoordinates(v0.pos, rows, cols); 
+	Vec2 pos1 = ndsToPixelCoordinates(v1.pos, rows, cols);
+	Vec2 pos2 = ndsToPixelCoordinates(v2.pos, rows, cols);
 
-	int delta_w0_row = pos1[0] - pos0[0];
-	int delta_w1_row = pos2[0] - pos1[0];
-	int delta_w2_row = pos0[0] - pos2[0];
+	// Finds the bounding= box with all candidate pixels
+	int x_min = floor(std::min(std::min(pos0[0], pos1[0]), pos2[0]));
+	int y_min = floor(std::min(std::min(pos0[1], pos1[1]), pos2[1]));
+	int x_max = ceil(std::max(std::max(pos0[0], pos1[0]), pos2[0]));
+	int y_max = ceil(std::max(std::max(pos0[1], pos1[1]), pos2[1]));
+	
+	// Compute the area of the entire triangle/parallelogram
+	float area = edge_cross(pos0, pos1, pos2);
 
-	int bias0 = is_flat_top_or_left_edge(pos0, pos1) ? 0 : -1; 
-	int bias1 = is_flat_top_or_left_edge(pos1, pos2) ? 0 : -1; 
-	int bias2 = is_flat_top_or_left_edge(pos2, pos0) ? 0 : -1; 
+	// Compute the constant delta_s that will be used for the horizontal and vertical steps
+	float delta_w0_col = (pos1[1] - pos2[1]);
+	float delta_w1_col = (pos2[1] - pos0[1]);
+	float delta_w2_col = (pos0[1] - pos1[1]);
+	float delta_w0_row = (pos2[0] - pos1[0]);
+	float delta_w1_row = (pos0[0] - pos2[0]);
+	float delta_w2_row = (pos1[0] - pos0[0]);
 
-	int xmin = std::min(std::min(pos0[0], pos1[0]), pos2[0]);
-	int ymin = std::min(std::min(pos0[1], pos1[1]), pos2[1]);
-	int xmax = std::max(std::max(pos0[0], pos1[0]), pos2[0]);
-	int ymax = std::max(std::max(pos0[1], pos1[1]), pos2[1]);
+	// Rasterization fill rule, not 100% precise due to floating point innacuracy
+	float bias0 = is_top_left(pos1, pos2) ? 0 : -0.0001;
+	float bias1 = is_top_left(pos2, pos0) ? 0 : -0.0001;
+	float bias2 = is_top_left(pos0, pos1) ? 0 : -0.0001;
 
-	int area = edge_cross(pos0, pos1, pos2);
+	// Compute the edge functions for the fist (top-left) point
+	Vec2 p0 = { x_min + 0.5f , y_min + 0.5f };
+	float w0_row = edge_cross(pos1, pos2, p0) + bias0;
+	float w1_row = edge_cross(pos2, pos0, p0) + bias1;
+	float w2_row = edge_cross(pos0, pos1, p0) + bias2;
 
-	iVec2 p0 = { xmin, ymin};
-	int w0_row = edge_cross(pos0, pos1, p0) + bias0;
-	int w1_row = edge_cross(pos1, pos2, p0) + bias1;
-	int w2_row = edge_cross(pos2, pos0, p0) + bias2;
-
-	for (int y = ymin; y <= ymax; y++) {
-		int w0 = w0_row;
-		int w1 = w1_row;
-		int w2 = w2_row;
-		for (int x = xmin; x <= xmax; x++) {
-			std::size_t pixelIdx = y * cols + x;
-			
-			// Barycentric coordinates in the triangle
-			float alpha = std::abs(static_cast<float>(w1) / area);
-			float beta = std::abs(static_cast<float>(w2) / area);
-			float gamma = std::abs(static_cast<float>(w0) / area);
+	// Loop all candidate pixels inside the bounding box
+	for (int y = y_min; y <=y_max; y++) {
+		float w0 = w0_row;
+		float w1 = w1_row;
+		float w2 = w2_row;
 		
-			// Is inside triangle?
-			if (w0 <= 0 && w1 <= 0 && w2 <= 0) {
+		for (int x = x_min; x <= x_max; x++) {
+			bool is_inside = w0 <= 0 && w1 <= 0 && w2 <= 0;
+			if (is_inside) {
+				// Barycentric coordinates
+				float alpha = w0 / area;
+				float beta  = w1 / area;
+				float gamma = w2 / area;
+				
+				// Interpolate color between vertices
 				Vec3 color {
-					(alpha * v0.color[0]) + (beta * v1.color[0]) + (gamma * v2.color[0]),
-					(alpha * v0.color[1]) + (beta * v1.color[1]) + (gamma * v2.color[1]),
-					(alpha * v0.color[2]) + (beta * v1.color[2]) + (gamma * v2.color[2])
+					(alpha) * v0.color[0] + (beta) * v1.color[0] + (gamma) * v2.color[0],
+					(alpha) * v0.color[1] + (beta) * v1.color[1] + (gamma) * v2.color[1],
+					(alpha) * v0.color[2] + (beta) * v1.color[2] + (gamma) * v2.color[2],
 				};
+
+				// Calculate texel position
 				iVec2 texelPos {
 					static_cast<int>((alpha * v0.texPos[0] + beta * v1.texPos[0] + gamma * v2.texPos[0]) * (texture.width - 1)),
 					static_cast<int>((alpha * v0.texPos[1] + beta * v1.texPos[1] + gamma * v2.texPos[1]) * (texture.height - 1))
 				};
+
+				// Sample texel
 				iVec3 texelColor = texture.GetPixel(texelPos);	
+				
+				// Combine pixel
 				Vec3 finalColor {
 					color[0] * (texelColor[0] / 255.0f),
 					color[1] * (texelColor[1] / 255.0f),
 					color[2] * (texelColor[2] / 255.0f)
 				};
-				std::string colorCode = getColorEscapeCode(finalColor);
-				memcpy(pixels[pixelIdx].colorCode, colorCode.c_str(), colorCode.size());
-				pixels[pixelIdx].pixel = '+';
+				
+				// Draw pixel
+				writePixel(pixels, iVec2{x, y}, getColorEscapeCode(finalColor),  rows, cols);
 			}
 			w0 += delta_w0_col;
 			w1 += delta_w1_col;
 			w2 += delta_w2_col;
 		}
+		
 		w0_row += delta_w0_row;
 		w1_row += delta_w1_row;
 		w2_row += delta_w2_row;
@@ -242,6 +262,7 @@ int main() {
 
 		// run frame
 		// create a pixel buffer
+		std::cout << WIPE_TERMINAL << std::endl;
 		std::vector<Pixel> pixels(pixelCount);
 		for (std::size_t i = 0; i < pixelCount; i++) {
 			char color[19] = {'\x1b', '[', '3', '8', ';', '2', ';', '2', '5', '5', ';', '2', '5', '5', ';', '2', '5', '5', 'm'};
