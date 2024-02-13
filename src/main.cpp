@@ -101,13 +101,12 @@ struct Texture {
 	int numComponents;
 };
 
-Vec2 ndsToPixelCoordinates(Vec2 nds, unsigned short rows,  unsigned short cols) {
+Vec2 ndsToPixelCoordinates(Vec2 nds, Terminal terminal) {
 	return Vec2 {
-		round((nds[0] + 1.0f) * 0.5f * (cols - 1)),
-		round((1.0f - nds[1]) * 0.5f * (rows - 1))
+		round((nds[0] + 1.0f) * 0.5f * (terminal.width - 1)),
+		round((1.0f - nds[1]) * 0.5f * (terminal.height - 1))
 	};
 }
-
 
 Vec2 rotate(Vec2 point, Vec2 center, float angle) {
 	Vec2 rot;
@@ -161,15 +160,15 @@ void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, Te
 }
 
 void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vertex v0, Vertex v1, Vertex v2, Terminal terminal) {	
-	Vec2 pos0 = ndsToPixelCoordinates(v0.pos, terminal.height, terminal.width); 
-	Vec2 pos1 = ndsToPixelCoordinates(v1.pos, terminal.height, terminal.width);
-	Vec2 pos2 = ndsToPixelCoordinates(v2.pos, terminal.height, terminal.width);
+	Vec2 pos0 = ndsToPixelCoordinates(v0.pos, terminal); 
+	Vec2 pos1 = ndsToPixelCoordinates(v1.pos, terminal);
+	Vec2 pos2 = ndsToPixelCoordinates(v2.pos, terminal);
 
 	// Finds the bounding= box with all candidate pixels
-	int x_min = floor(std::min(std::min(pos0[0], pos1[0]), pos2[0]));
-	int y_min = floor(std::min(std::min(pos0[1], pos1[1]), pos2[1]));
-	int x_max = ceil(std::max(std::max(pos0[0], pos1[0]), pos2[0]));
-	int y_max = ceil(std::max(std::max(pos0[1], pos1[1]), pos2[1]));
+	int x_min = static_cast<int>(std::floorf(std::min(std::min(pos0[0], pos1[0]), pos2[0])));
+	int y_min = static_cast<int>(std::floorf(std::min(std::min(pos0[1], pos1[1]), pos2[1])));
+	int x_max = static_cast<int>(std::ceilf(std::max(std::max(pos0[0], pos1[0]), pos2[0])));
+	int y_max = static_cast<int>(std::ceilf(std::max(std::max(pos0[1], pos1[1]), pos2[1])));
 	
 	// Compute the area of the entire triangle/parallelogram
 	float area = edge_cross(pos0, pos1, pos2);
@@ -183,9 +182,9 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 	float delta_w2_row = (pos1[0] - pos0[0]);
 
 	// Rasterization fill rule, not 100% precise due to floating point innacuracy
-	float bias0 = is_top_left(pos1, pos2) ? 0 : -0.0001;
-	float bias1 = is_top_left(pos2, pos0) ? 0 : -0.0001;
-	float bias2 = is_top_left(pos0, pos1) ? 0 : -0.0001;
+	float bias0 = is_top_left(pos1, pos2) ? 0.0f : -0.0001f;
+	float bias1 = is_top_left(pos2, pos0) ? 0.0f : -0.0001f;
+	float bias2 = is_top_left(pos0, pos1) ? 0.0f : -0.0001f;
 
 	// Compute the edge functions for the fist (top-left) point
 	Vec2 p0 = { x_min + 0.5f , y_min + 0.5f };
@@ -237,7 +236,6 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 			w1 += delta_w1_col;
 			w2 += delta_w2_col;
 		}
-		
 		w0_row += delta_w0_row;
 		w1_row += delta_w1_row;
 		w2_row += delta_w2_row;
