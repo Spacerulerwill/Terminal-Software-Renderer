@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <chrono>
 #include <thread>
+#include <math.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -15,7 +16,7 @@ struct Terminal {
     unsigned int height;
 };
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 
 #include <sys/ioctl.h>
 #include <termios.h>
@@ -37,7 +38,7 @@ void MoveCursorToStart() {
     std::cout << "\033[0;0f";
 }
 
-#elif _WIN32
+#elif defined(_WIN32)
 
 #define NOMINMAX
 #include <Windows.h>
@@ -165,10 +166,10 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 	Vec2 pos2 = ndsToPixelCoordinates(v2.pos, terminal);
 
 	// Finds the bounding= box with all candidate pixels
-	int x_min = static_cast<int>(std::floorf(std::min(std::min(pos0[0], pos1[0]), pos2[0])));
-	int y_min = static_cast<int>(std::floorf(std::min(std::min(pos0[1], pos1[1]), pos2[1])));
-	int x_max = static_cast<int>(std::ceilf(std::max(std::max(pos0[0], pos1[0]), pos2[0])));
-	int y_max = static_cast<int>(std::ceilf(std::max(std::max(pos0[1], pos1[1]), pos2[1])));
+	int x_min = static_cast<int>(floorf(std::min(std::min(pos0[0], pos1[0]), pos2[0])));
+	int y_min = static_cast<int>(floorf(std::min(std::min(pos0[1], pos1[1]), pos2[1])));
+	int x_max = static_cast<int>(ceilf(std::max(std::max(pos0[0], pos1[0]), pos2[0])));
+	int y_max = static_cast<int>(ceilf(std::max(std::max(pos0[1], pos1[1]), pos2[1])));
 	
 	// Compute the area of the entire triangle/parallelogram
 	float area = edge_cross(pos0, pos1, pos2);
