@@ -16,26 +16,29 @@ struct Terminal {
 };
 
 #ifdef __linux__
+
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+
+#define SWITCH_TO_ALT_TERMINAL "\u001B[?1049h" 
+#define RESTORE_TERMINAL "\u001B[?1049l" 
 
 Terminal getTerminal() {
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     return Terminal{
         .width = static_cast<unsigned int>(w.ws_col),
-        .height = stati_cast<unsigned int>(w.ws_row),
+        .height = static_cast<unsigned int>(w.ws_row),
     };
 }
 
 void MoveCursorToStart() {
-    std::cout << "\x1B[2J\x1B[H";
+    std::cout << "\033[0;0f";
 }
 
-#define SWITCH_TO_ALT_TERMINAL "\u001B[?1049h" 
-#define RESTORE_TERMINAL "\u001B[?1049l" 
 #elif _WIN32
+
 #define NOMINMAX
 #include <Windows.h>
 
@@ -56,6 +59,7 @@ void MoveCursorToStart() {
     static const COORD top_left = { 0, 0 };
     SetConsoleCursorPosition(std_handle, top_left);
 }
+
 #endif
 
 struct Pixel {
@@ -148,7 +152,7 @@ bool is_top_left(Vec2 start, Vec2 end) {
 }
 
 void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, Terminal terminal) {
-	if (pos[0] < 0 || pos[0] >= terminal.width || pos[1] < 0 || pos[1] >= terminal.height) {
+	if (pos[0] < 0 || pos[0] >= static_cast<int>(terminal.width) || pos[1] < 0 || pos[1] >= static_cast<int>(terminal.height)) {
 		return;
 	}
 	std::size_t pxlIdx = (terminal.width * pos[1]) + pos[0];
