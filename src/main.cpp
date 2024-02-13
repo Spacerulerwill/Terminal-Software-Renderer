@@ -61,12 +61,17 @@ void MoveCursorToStart() {
     SetConsoleCursorPosition(std_handle, top_left);
 }
 
+#else
+#error Platform not supported!
 #endif
 
 struct Pixel {
 	char colorCode[19];
 	char pixel;
 };
+
+const char pixelChar = '#';
+const char noPixelChar = ' ';
 
 using iVec2 = std::array<int, 2>;
 using iVec3 = std::array<int, 3>;
@@ -157,7 +162,7 @@ void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, Te
 	}
 	std::size_t pxlIdx = (terminal.width * static_cast<unsigned int>(pos[1])) + static_cast<unsigned int>(pos[0]);
 	memcpy(pixels[pxlIdx].colorCode, colorCode.c_str(), 19);
-	pixels[pxlIdx].pixel = '+';
+	pixels[pxlIdx].pixel = pixelChar;
 }
 
 void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vertex v0, Vertex v1, Vertex v2, Terminal terminal) {	
@@ -251,7 +256,7 @@ int main() {
 #ifdef __linux__
     std::cout << SWITCH_TO_ALT_TERMINAL;
 #endif 
-    MoveCursorToStart();
+    //MoveCursorToStart();
 	// get terminal dimensions
     Terminal terminal = getTerminal();
 	std::size_t pixelCount = terminal.width * terminal.height;
@@ -287,6 +292,9 @@ int main() {
 	auto b = std::chrono::system_clock::now();
 	double frameTime = (1.0 / 10) * 1000;
 
+	std::vector<Pixel> pixels(pixelCount);
+	std::vector<char> printBuffer(sizeof(Pixel) * pixels.size() + 1);
+
 	while (true)
     {
         // Maintain designated frequency of 5 Hz (200 ms per frame)
@@ -306,11 +314,10 @@ int main() {
 		// run frame
 		// create a pixel buffer
         MoveCursorToStart();
-		std::vector<Pixel> pixels(pixelCount);
 		for (std::size_t i = 0; i < pixelCount; i++) {
 			char color[19] = {'\x1b', '[', '3', '8', ';', '2', ';', '2', '5', '5', ';', '2', '5', '5', ';', '2', '5', '5', 'm'};
 			memcpy(pixels[i].colorCode, color, sizeof(color));
-			pixels[i].pixel = ' ';
+			pixels[i].pixel = noPixelChar;
 		}
 
 		// rotate triangle
@@ -323,10 +330,9 @@ int main() {
 		rasterize_triangle(texture, pixels, vertices[3], vertices[2], vertices[1], terminal);	
 
 		// print
-		std::vector<char> temp(sizeof(Pixel) * pixels.size() + 1);
-		memcpy(temp.data(), pixels.data(), sizeof(Pixel) * pixels.size());
-		temp[sizeof(Pixel) * pixels.size()] = '\0';
-		std::cout << temp.data();
+		memcpy(printBuffer.data(), pixels.data(), sizeof(Pixel) * pixels.size());
+		printBuffer[sizeof(Pixel) * pixels.size()] = '\0';
+		std::cout << printBuffer.data();
     }
 
 #ifdef __linux__
