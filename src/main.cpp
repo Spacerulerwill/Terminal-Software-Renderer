@@ -104,8 +104,8 @@ struct Texture {
 
 Vec2 ndsToPixelCoordinates(Vec2 nds, Terminal terminal) {
 	return Vec2 {
-		round((nds[0] + 1.0f) * 0.5f * (terminal.width - 1)),
-		round((1.0f - nds[1]) * 0.5f * (terminal.height - 1))
+		round((nds[0] + 1.0f) * 0.5f * static_cast<float>(terminal.width - 1)),
+		round((1.0f - nds[1]) * 0.5f * static_cast<float>(terminal.height - 1))
 	};
 }
 
@@ -155,7 +155,7 @@ void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, Te
 	if (pos[0] < 0 || pos[0] >= static_cast<int>(terminal.width) || pos[1] < 0 || pos[1] >= static_cast<int>(terminal.height)) {
 		return;
 	}
-	std::size_t pxlIdx = (terminal.width * pos[1]) + pos[0];
+	std::size_t pxlIdx = (terminal.width * static_cast<unsigned int>(pos[1])) + static_cast<unsigned int>(pos[0]);
 	memcpy(pixels[pxlIdx].colorCode, colorCode.c_str(), 19);
 	pixels[pxlIdx].pixel = '+';
 }
@@ -188,7 +188,7 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 	float bias2 = is_top_left(pos0, pos1) ? 0.0f : -0.0001f;
 
 	// Compute the edge functions for the fist (top-left) point
-	Vec2 p0 = { x_min + 0.5f , y_min + 0.5f };
+	Vec2 p0 = { static_cast<float>(x_min) + 0.5f , static_cast<float>(y_min) + 0.5f };
 	float w0_row = edge_cross(pos1, pos2, p0) + bias0;
 	float w1_row = edge_cross(pos2, pos0, p0) + bias1;
 	float w2_row = edge_cross(pos0, pos1, p0) + bias2;
@@ -216,8 +216,8 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 
 				// Calculate texel position
 				iVec2 texelPos {
-					static_cast<int>((alpha * v0.texPos[0] + beta * v1.texPos[0] + gamma * v2.texPos[0]) * (texture.width - 1)),
-					static_cast<int>((alpha * v0.texPos[1] + beta * v1.texPos[1] + gamma * v2.texPos[1]) * (texture.height - 1))
+					static_cast<int>((alpha * v0.texPos[0] + beta * v1.texPos[0] + gamma * v2.texPos[0]) * static_cast<float>(texture.width - 1)),
+					static_cast<int>((alpha * v0.texPos[1] + beta * v1.texPos[1] + gamma * v2.texPos[1]) * static_cast<float>(texture.height - 1))
 				};
 
 				// Sample texel
@@ -225,9 +225,9 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 				
 				// Combine pixel
 				Vec3 finalColor {
-					color[0] * (texelColor[0] / 255.0f),
-					color[1] * (texelColor[1] / 255.0f),
-					color[2] * (texelColor[2] / 255.0f)
+					color[0] * (static_cast<float>(texelColor[0]) / 255.0f),
+					color[1] * (static_cast<float>(texelColor[1]) / 255.0f),
+					color[2] * (static_cast<float>(texelColor[2]) / 255.0f)
 				};
 				
 				// Draw pixel
