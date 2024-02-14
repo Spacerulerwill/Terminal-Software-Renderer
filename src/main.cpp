@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <chrono>
 #include <thread>
+#include <numbers>
 #include <math.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -77,9 +78,10 @@ using iVec2 = std::array<int, 2>;
 using iVec3 = std::array<int, 3>;
 using Vec2 = std::array<float, 2>;
 using Vec3 = std::array<float, 3>;
+using Vec4 = std::array<float, 4>;
 
 struct Vertex {
-	Vec2 pos;
+	Vec3 pos;
 	Vec3 color;
 	Vec2 texPos;
 };
@@ -107,6 +109,12 @@ struct Texture {
 	int numComponents;
 };
 
+constexpr float PI_OVER_180 = static_cast<float>(std::numbers::pi) / 180.0f;
+float radians(float theta)
+{
+    return theta * PI_OVER_180;
+}
+
 Vec2 ndsToPixelCoordinates(Vec2 nds, Terminal terminal) {
 	return Vec2 {
 		round((nds[0] + 1.0f) * 0.5f * static_cast<float>(terminal.width - 1)),
@@ -114,14 +122,17 @@ Vec2 ndsToPixelCoordinates(Vec2 nds, Terminal terminal) {
 	};
 }
 
-Vec2 rotate(Vec2 point, Vec2 center, float angle) {
-	Vec2 rot;
+Vec3 rotate(Vec3 point, Vec3 center, float angle) {
+	Vec3 rot;
 	point[0] -= center[0];
 	point[1] -= center[1];
-	rot[0] = point[0] * std::cos(angle) - point[1] * std::sin(angle);
-	rot[1] = point[0] * std::sin(angle) + point[1] * std::cos(angle);
+	point[2] -= center[2];
+	rot[0] = point[0] * std::cos(angle) + point[2] * std::sin(angle);
+	rot[1] = point[1];
+	rot[2] = point[2] * std::cos(angle) - point[0] * std::sin(angle);
 	rot[0] += center[0];
 	rot[1] += center[1];
+	rot[2] += center[2];
 	return rot;
 }
 
@@ -156,6 +167,17 @@ bool is_top_left(Vec2 start, Vec2 end) {
 	return is_left_edge || is_top_edge;
 }
 
+Vec4 apply_perspective(Vec3 point, float fov, float aspect, float near_dist, float far_dist) 
+{
+	const float f = 1.0f / std::tan(fov / 2.0f);
+	return Vec4 {
+		point[0] * f,
+		point[1] * f,
+		(point[2] * ((far_dist + near_dist) / (near_dist - far_dist))) + 1.0f * ((2 * far_dist * near_dist) / (near_dist - far_dist)),
+		point[2] * -1.0f 
+	};
+}
+
 void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, Terminal terminal) {
 	if (pos[0] < 0 || pos[0] >= static_cast<int>(terminal.width) || pos[1] < 0 || pos[1] >= static_cast<int>(terminal.height)) {
 		return;
@@ -166,20 +188,26 @@ void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, Te
 }
 
 void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vertex v0, Vertex v1, Vertex v2, Terminal terminal) {	
-	Vec2 pos0 = ndsToPixelCoordinates(v0.pos, terminal); 
-	Vec2 pos1 = ndsToPixelCoordinates(v1.pos, terminal);
-	Vec2 pos2 = ndsToPixelCoordinates(v2.pos, terminal);
+	// Multiply our world space coordinates by our projection matrix
+	Vec4 v0_perspective = apply_perspective(v0.pos, radians(90.0f), static_cast<float>(terminal.width) / static_cast<float>(terminal.height), 0.1f, 100.0f);
+	Vec4 v1_perspective = apply_perspective(v1.pos, radians(90.0f), static_cast<float>(terminal.width) / static_cast<float>(terminal.height), 0.1f, 100.0f);
+	Vec4 v2_perspective = apply_perspective(v2.pos, radians(90.0f), static_cast<float>(terminal.width) / static_cast<float>(terminal.height), 0.1f, 100.0f);
+	
+	// Convert their projected positions for NDS (making sure to divide by w component)
+	Vec2 pos0 = ndsToPixelCoordinates(Vec2{v0_perspective[0] / v0_perspective[3], v0_perspective[1] / v0_perspective[3]}, terminal); 
+	Vec2 pos1 = ndsToPixelCoordinates(Vec2{v1_perspective[0] / v1_perspective[3], v1_perspective[1] / v1_perspective[3]}, terminal);
+	Vec2 pos2 = ndsToPixelCoordinates(Vec2{v2_perspective[0] / v2_perspective[3], v2_perspective[1] / v2_perspective[3]}, terminal);
 
-	// Finds the bounding= box with all candidate pixels
+	// Find the minimum bounding box around the triangle to cheaply reduce the amount of pixels needed to check 
 	int x_min = static_cast<int>(floorf(std::min(std::min(pos0[0], pos1[0]), pos2[0])));
 	int y_min = static_cast<int>(floorf(std::min(std::min(pos0[1], pos1[1]), pos2[1])));
 	int x_max = static_cast<int>(ceilf(std::max(std::max(pos0[0], pos1[0]), pos2[0])));
 	int y_max = static_cast<int>(ceilf(std::max(std::max(pos0[1], pos1[1]), pos2[1])));
 	
-	// Compute the area of the entire triangle/parallelogram
+	// Area of the whole triangle
 	float area = edge_cross(pos0, pos1, pos2);
 
-	// Compute the constant delta_s that will be used for the horizontal and vertical steps
+	// Compute constant deltas that will be used to horizontal and vertical steps 
 	float delta_w0_col = (pos1[1] - pos2[1]);
 	float delta_w1_col = (pos2[1] - pos0[1]);
 	float delta_w2_col = (pos0[1] - pos1[1]);
@@ -192,49 +220,50 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 	float bias1 = is_top_left(pos2, pos0) ? 0.0f : -0.0001f;
 	float bias2 = is_top_left(pos0, pos1) ? 0.0f : -0.0001f;
 
-	// Compute the edge functions for the fist (top-left) point
+	// Edge functions for top left pixel 
 	Vec2 p0 = { static_cast<float>(x_min) + 0.5f , static_cast<float>(y_min) + 0.5f };
 	float w0_row = edge_cross(pos1, pos2, p0) + bias0;
 	float w1_row = edge_cross(pos2, pos0, p0) + bias1;
 	float w2_row = edge_cross(pos0, pos1, p0) + bias2;
 
-	// Loop all candidate pixels inside the bounding box
+	// Loop over bounding box 
 	for (int y = y_min; y <=y_max; y++) {
 		float w0 = w0_row;
 		float w1 = w1_row;
 		float w2 = w2_row;
 		
 		for (int x = x_min; x <= x_max; x++) {
-			bool is_inside = w0 <= 0 && w1 <= 0 && w2 <= 0;
+			// Check if inside - disable one of these to only render one based on winding order
+			bool is_inside = (w0 <= 0 && w1 <= 0 && w2 <= 0) || (w0 >= 0 && w1 >= 0 && w2 >= 0);
 			if (is_inside) {
 				// Barycentric coordinates
 				float alpha = w0 / area;
 				float beta  = w1 / area;
 				float gamma = w2 / area;
-				
 				// Interpolate color between vertices
 				Vec3 color {
 					(alpha) * v0.color[0] + (beta) * v1.color[0] + (gamma) * v2.color[0],
 					(alpha) * v0.color[1] + (beta) * v1.color[1] + (gamma) * v2.color[1],
 					(alpha) * v0.color[2] + (beta) * v1.color[2] + (gamma) * v2.color[2],
-				};
-
-				// Calculate texel position
+				};	
+				// Linearly interpolate w component
+				float w = alpha * (1.0f / v0_perspective[3]) + beta * (1.0f / v1_perspective[3]) + gamma * (1.0f / v2_perspective[3]);	
+				// Interpolate texture coordinates, dividing by w components
+				float u = alpha * (v0.texPos[0] / v0_perspective[3]) + beta * (v1.texPos[0] / v1_perspective[3]) + gamma * (v2.texPos[0] / v2_perspective[3]); 
+				float v = alpha * (v0.texPos[1] / v0_perspective[3]) + beta * (v1.texPos[1] / v1_perspective[3]) + gamma * (v2.texPos[1] / v2_perspective[3]);
+				// Calculate texel pos
 				iVec2 texelPos {
-					static_cast<int>((alpha * v0.texPos[0] + beta * v1.texPos[0] + gamma * v2.texPos[0]) * static_cast<float>(texture.width - 1)),
-					static_cast<int>((alpha * v0.texPos[1] + beta * v1.texPos[1] + gamma * v2.texPos[1]) * static_cast<float>(texture.height - 1))
+					static_cast<int>((u / w) * static_cast<float>(texture.width - 1)),
+					static_cast<int>((v / w) * static_cast<float>(texture.height - 1))
 				};
-
-				// Sample texel
+				// Sample texel from texture
 				iVec3 texelColor = texture.GetPixel(texelPos);	
-				
-				// Combine pixel
+				// Combine pixel color and texture color
 				Vec3 finalColor {
 					color[0] * (static_cast<float>(texelColor[0]) / 255.0f),
 					color[1] * (static_cast<float>(texelColor[1]) / 255.0f),
 					color[2] * (static_cast<float>(texelColor[2]) / 255.0f)
 				};
-				
 				// Draw pixel
 				writePixel(pixels, iVec2{x, y}, getColorEscapeCode(finalColor), terminal);
 			}
@@ -256,7 +285,7 @@ int main() {
 #ifdef __linux__
     std::cout << SWITCH_TO_ALT_TERMINAL;
 #endif 
-    //MoveCursorToStart();
+    MoveCursorToStart();
 	// get terminal dimensions
     Terminal terminal = getTerminal();
 	std::size_t pixelCount = terminal.width * terminal.height;
@@ -265,32 +294,37 @@ int main() {
 	std::array vertices = {
 		// triangle 1
 		Vertex {
-			.pos = {-0.5f, -0.5f},
+			.pos = {-0.5f, -0.5f, -1.0f},
 			.color = {1.0f, 0.0f, 0.0f},
 			.texPos = {0.0f, 0.0f},
 		},
 		Vertex {
-			.pos = {0.5f, -0.5f},
+			.pos = {0.5f, -0.5f, -1.0f},
 			.color = {0.0f, 1.0f, 0.0f},
 			.texPos = {1.0f, 0.0f},
 		},
 		Vertex {
-			.pos = {-0.5f, 0.5f},
+			.pos = {-0.5f, 0.5f, -1.0f},
 			.color = {0.0f, 0.0f, 1.0f},
 			.texPos = {0.0f, 1.0f}
 		},
 		Vertex {
-			.pos = {0.5f, 0.5f},
+			.pos = {0.5f, 0.5f, -1.0f},
 			.color = {1.0f, 0.0f, 0.0f},
 			.texPos = {1.0f, 1.0f}
 		}
 	};	
 
+	std::array<std::size_t, 6> indices {
+		0,1,2,
+		3,2,1
+	};
+
 	// Load texture
 	Texture texture("awesomeface.png");
 	auto a = std::chrono::system_clock::now();
 	auto b = std::chrono::system_clock::now();
-	double frameTime = (1.0 / 10) * 1000;
+	double frameTime = (1.0 / 15) * 1000;
 
 	std::vector<Pixel> pixels(pixelCount);
 	std::vector<char> printBuffer(sizeof(Pixel) * pixels.size() + 1);
@@ -313,21 +347,22 @@ int main() {
 
 		// run frame
 		// create a pixel buffer
-        MoveCursorToStart();
+		MoveCursorToStart();
 		for (std::size_t i = 0; i < pixelCount; i++) {
 			char color[19] = {'\x1b', '[', '3', '8', ';', '2', ';', '2', '5', '5', ';', '2', '5', '5', ';', '2', '5', '5', 'm'};
 			memcpy(pixels[i].colorCode, color, sizeof(color));
 			pixels[i].pixel = noPixelChar;
 		}
 
-		// rotate triangle
+		// rotate vertices
 		for (auto& vertex : vertices) {
-			vertex.pos = rotate(vertex.pos, Vec2{0.0f, 0.0f}, 0.1f);
+			vertex.pos = rotate(vertex.pos, Vec3{0.0f, 0.0f, -1.0f}, 0.1f);
 		}
 	 	
 		// rasterize triangles
-		rasterize_triangle(texture, pixels, vertices[0], vertices[1], vertices[2], terminal);
-		rasterize_triangle(texture, pixels, vertices[3], vertices[2], vertices[1], terminal);	
+		for (std::size_t i = 0; i < indices.size(); i+=3) {
+			rasterize_triangle(texture, pixels, vertices[indices[i]], vertices[indices[i+1]], vertices[indices[i+2]], terminal);
+		}
 
 		// print
 		memcpy(printBuffer.data(), pixels.data(), sizeof(Pixel) * pixels.size());
