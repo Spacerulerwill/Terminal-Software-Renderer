@@ -187,7 +187,7 @@ void writePixel(std::vector<Pixel>& pixels, iVec2 pos, std::string colorCode, Te
 	pixels[pxlIdx].pixel = pixelChar;
 }
 
-void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vertex v0, Vertex v1, Vertex v2, Terminal terminal) {	
+void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, std::vector<float>& depthBuffer, Vertex v0, Vertex v1, Vertex v2, Terminal terminal) {	
 	// Multiply our world space coordinates by our projection matrix
 	Vec4 v0_perspective = apply_perspective(v0.pos, radians(90.0f), static_cast<float>(terminal.width) / static_cast<float>(terminal.height), 0.1f, 100.0f);
 	Vec4 v1_perspective = apply_perspective(v1.pos, radians(90.0f), static_cast<float>(terminal.width) / static_cast<float>(terminal.height), 0.1f, 100.0f);
@@ -264,8 +264,12 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, Vert
 					color[1] * (static_cast<float>(texelColor[1]) / 255.0f),
 					color[2] * (static_cast<float>(texelColor[2]) / 255.0f)
 				};
-				// Draw pixel
-				writePixel(pixels, iVec2{x, y}, getColorEscapeCode(finalColor), terminal);
+				float depth = alpha * (v0_perspective[2] / v0_perspective[3]) + beta * (v1_perspective[2] / v1_perspective[3]) + gamma * (v2_perspective[2] / v2_perspective[3]);
+				std::size_t pxlIdx = (y * terminal.width) + x;
+				if (depth < depthBuffer[pxlIdx]) {
+					depthBuffer[pxlIdx] = depth;
+					writePixel(pixels, iVec2{x, y}, getColorEscapeCode(finalColor), terminal);
+				}
 			}
 			w0 += delta_w0_col;
 			w1 += delta_w1_col;
@@ -292,7 +296,7 @@ int main() {
 	
 	// Our vertices - anticlockwise winding order
 	std::array vertices = {
-		// triangle 1
+		// quad 1
 		Vertex {
 			.pos = {-0.5f, -0.5f, -1.0f},
 			.color = {1.0f, 0.0f, 0.0f},
@@ -312,12 +316,35 @@ int main() {
 			.pos = {0.5f, 0.5f, -1.0f},
 			.color = {1.0f, 0.0f, 0.0f},
 			.texPos = {1.0f, 1.0f}
+		},
+		// quad 2
+		Vertex {
+			.pos = {-0.75f, -0.75f, -1.5f},
+			.color = {1.0f, 0.0f, 0.0f},
+			.texPos = {0.0f, 0.0f},
+		},
+		Vertex {
+			.pos = {-0.25f, -0.75f, -1.5f},
+			.color = {0.0f, 1.0f, 0.0f},
+			.texPos = {1.0f, 0.0f},
+		},
+		Vertex {
+			.pos = {-0.75f, -0.25f, -1.5f},
+			.color = {0.0f, 0.0f, 1.0f},
+			.texPos = {0.0f, 1.0f}
+		},
+		Vertex {
+			.pos = {-0.25f, -0.25f, -1.5f},
+			.color = {1.0f, 0.0f, 0.0f},
+			.texPos = {1.0f, 1.0f}
 		}
 	};	
 
-	std::array<std::size_t, 6> indices {
+	std::array<std::size_t, 12> indices {
 		0,1,2,
-		3,2,1
+		3,2,1,
+		4,5,6,
+		7,6,5
 	};
 
 	// Load texture
@@ -327,6 +354,7 @@ int main() {
 	double frameTime = (1.0 / 15) * 1000;
 
 	std::vector<Pixel> pixels(pixelCount);
+	std::vector<float> depthBuffer(pixelCount, 1.0f);
 	std::vector<char> printBuffer(sizeof(Pixel) * pixels.size() + 1);
 
 	while (true)
@@ -346,22 +374,22 @@ int main() {
         std::chrono::duration<double, std::milli> sleep_time = b - a;
 
 		// run frame
-		// create a pixel buffer
 		MoveCursorToStart();
+		std::fill(depthBuffer.begin(), depthBuffer.end(), 1.0f);
 		for (std::size_t i = 0; i < pixelCount; i++) {
 			char color[19] = {'\x1b', '[', '3', '8', ';', '2', ';', '2', '5', '5', ';', '2', '5', '5', ';', '2', '5', '5', 'm'};
 			memcpy(pixels[i].colorCode, color, sizeof(color));
 			pixels[i].pixel = noPixelChar;
 		}
 
-		// rotate vertices
-		for (auto& vertex : vertices) {
+		for (std::size_t i = 0; i < 4; i++) {
+			Vertex& vertex = vertices[i];
 			vertex.pos = rotate(vertex.pos, Vec3{0.0f, 0.0f, -1.0f}, 0.1f);
 		}
-	 	
+
 		// rasterize triangles
 		for (std::size_t i = 0; i < indices.size(); i+=3) {
-			rasterize_triangle(texture, pixels, vertices[indices[i]], vertices[indices[i+1]], vertices[indices[i+2]], terminal);
+			rasterize_triangle(texture, pixels, depthBuffer, vertices[indices[i]], vertices[indices[i+1]], vertices[indices[i+2]], terminal);
 		}
 
 		// print
