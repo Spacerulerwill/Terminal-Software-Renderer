@@ -41,7 +41,7 @@ void MoveCursorToStart() {
     std::cout << "\033[0;0f";
 }
 
-char getch() {
+char getch_noblock() {
 	char buf = 0;
 	struct termios old = {0};
 	if (tcgetattr(0, &old) < 0)
@@ -66,6 +66,7 @@ char getch() {
 
 #define NOMINMAX
 #include <Windows.h>
+#include <conio.h>
 
 Terminal getTerminal() {
     CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -83,6 +84,13 @@ void MoveCursorToStart() {
     static const HANDLE std_handle = GetStdHandle(STD_OUTPUT_HANDLE);
     static const COORD top_left = { 0, 0 };
     SetConsoleCursorPosition(std_handle, top_left);
+}
+
+int getch_noblock() {
+    if (_kbhit())
+        return _getch();
+    else
+        return -1;
 }
 
 #else
@@ -361,8 +369,7 @@ int main() {
 	char ch;
 	do
     {
-		ch = getch();
-        // Maintain designated frequency of 5 Hz (200 ms per frame)
+		ch = getch_noblock();
         a = std::chrono::system_clock::now();
         std::chrono::duration<double, std::milli> work_time = a - b;
 
