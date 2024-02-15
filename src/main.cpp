@@ -26,6 +26,7 @@ struct Terminal {
 #define SWITCH_TO_ALT_TERMINAL "\u001B[?1049h" 
 #define RESTORE_TERMINAL "\u001B[?1049l" 
 
+// Get terminal information
 Terminal getTerminal() {
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
@@ -35,8 +36,30 @@ Terminal getTerminal() {
     };
 }
 
+// Move cursor to start of terminal
 void MoveCursorToStart() {
     std::cout << "\033[0;0f";
+}
+
+char getch() {
+	char buf = 0;
+	struct termios old = {0};
+	if (tcgetattr(0, &old) < 0)
+		perror("tcsetattr()");
+	old.c_lflag &= ~ICANON;
+	old.c_lflag &= ~ECHO;
+	old.c_cc[VMIN] = 1;
+	old.c_cc[VTIME] = 0;
+	old.c_cc[VMIN] = 0;
+	if (tcsetattr(0, TCSANOW, &old) < 0)
+		perror("tcsetattr ICANON");
+	if (read(0, &buf, 1) < 0)
+		perror ("read()");
+	old.c_lflag |= ICANON;
+	old.c_lflag |= ECHO;
+	if (tcsetattr(0, TCSADRAIN, &old) < 0)
+		perror ("tcsetattr ~ICANON");
+	return (buf);
 }
 
 #elif defined(_WIN32)
@@ -240,14 +263,15 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, std:
 				float alpha = w0 / area;
 				float beta  = w1 / area;
 				float gamma = w2 / area;
+				// Linearly interpolate w component
+				float w = alpha * (1.0f / v0_perspective[3]) + beta * (1.0f / v1_perspective[3]) + gamma * (1.0f / v2_perspective[3]);	
 				// Interpolate color between vertices
 				Vec3 color {
 					(alpha) * v0.color[0] + (beta) * v1.color[0] + (gamma) * v2.color[0],
 					(alpha) * v0.color[1] + (beta) * v1.color[1] + (gamma) * v2.color[1],
 					(alpha) * v0.color[2] + (beta) * v1.color[2] + (gamma) * v2.color[2],
 				};	
-				// Linearly interpolate w component
-				float w = alpha * (1.0f / v0_perspective[3]) + beta * (1.0f / v1_perspective[3]) + gamma * (1.0f / v2_perspective[3]);	
+
 				// Interpolate texture coordinates, dividing by w components
 				float u = alpha * (v0.texPos[0] / v0_perspective[3]) + beta * (v1.texPos[0] / v1_perspective[3]) + gamma * (v2.texPos[0] / v2_perspective[3]); 
 				float v = alpha * (v0.texPos[1] / v0_perspective[3]) + beta * (v1.texPos[1] / v1_perspective[3]) + gamma * (v2.texPos[1] / v2_perspective[3]);
@@ -317,34 +341,11 @@ int main() {
 			.color = {1.0f, 0.0f, 0.0f},
 			.texPos = {1.0f, 1.0f}
 		},
-		// quad 2
-		Vertex {
-			.pos = {-0.75f, -0.75f, -1.5f},
-			.color = {1.0f, 0.0f, 0.0f},
-			.texPos = {0.0f, 0.0f},
-		},
-		Vertex {
-			.pos = {-0.25f, -0.75f, -1.5f},
-			.color = {0.0f, 1.0f, 0.0f},
-			.texPos = {1.0f, 0.0f},
-		},
-		Vertex {
-			.pos = {-0.75f, -0.25f, -1.5f},
-			.color = {0.0f, 0.0f, 1.0f},
-			.texPos = {0.0f, 1.0f}
-		},
-		Vertex {
-			.pos = {-0.25f, -0.25f, -1.5f},
-			.color = {1.0f, 0.0f, 0.0f},
-			.texPos = {1.0f, 1.0f}
-		}
 	};	
 
-	std::array<std::size_t, 12> indices {
+	std::array<std::size_t, 6> indices {
 		0,1,2,
-		3,2,1,
-		4,5,6,
-		7,6,5
+		3,2,1
 	};
 
 	// Load texture
@@ -357,8 +358,10 @@ int main() {
 	std::vector<float> depthBuffer(pixelCount, 1.0f);
 	std::vector<char> printBuffer(sizeof(Pixel) * pixels.size() + 1);
 
-	while (true)
+	char ch;
+	do
     {
+		ch = getch();
         // Maintain designated frequency of 5 Hz (200 ms per frame)
         a = std::chrono::system_clock::now();
         std::chrono::duration<double, std::milli> work_time = a - b;
@@ -396,7 +399,7 @@ int main() {
 		memcpy(printBuffer.data(), pixels.data(), sizeof(Pixel) * pixels.size());
 		printBuffer[sizeof(Pixel) * pixels.size()] = '\0';
 		std::cout << printBuffer.data();
-    }
+    } while (ch != 'q');
 
 #ifdef __linux__
 	// restore the previous terminal
