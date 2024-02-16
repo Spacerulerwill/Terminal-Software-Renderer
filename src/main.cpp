@@ -43,7 +43,7 @@ void MoveCursorToStart() {
 
 char getch_noblock() {
 	char buf = 0;
-	struct termios old = {0};
+	struct termios old {};
 	if (tcgetattr(0, &old) < 0)
 		perror("tcsetattr()");
 	old.c_lflag &= ~ICANON;
@@ -59,7 +59,7 @@ char getch_noblock() {
 	old.c_lflag |= ECHO;
 	if (tcsetattr(0, TCSADRAIN, &old) < 0)
 		perror ("tcsetattr ~ICANON");
-	return (buf);
+	return buf;
 }
 
 #elif defined(_WIN32)
@@ -275,9 +275,9 @@ void rasterize_triangle(const Texture& texture, std::vector<Pixel>& pixels, std:
 				float w = alpha * (1.0f / v0_perspective[3]) + beta * (1.0f / v1_perspective[3]) + gamma * (1.0f / v2_perspective[3]);	
 				// Interpolate color between vertices
 				Vec3 color {
-					(alpha) * v0.color[0] + (beta) * v1.color[0] + (gamma) * v2.color[0],
-					(alpha) * v0.color[1] + (beta) * v1.color[1] + (gamma) * v2.color[1],
-					(alpha) * v0.color[2] + (beta) * v1.color[2] + (gamma) * v2.color[2],
+					(alpha * (v0.color[0] / v0_perspective[3]) + beta * (v1.color[0] / v1_perspective[3]) + gamma * (v2.color[0] / v2_perspective[3])) / w,
+					(alpha * (v0.color[1] / v0_perspective[3]) + beta * (v1.color[1] / v1_perspective[3]) + gamma * (v2.color[1] / v2_perspective[3])) / w,
+					(alpha * (v0.color[2] / v0_perspective[3]) + beta * (v1.color[2] / v1_perspective[3]) + gamma * (v2.color[2] / v2_perspective[3])) / w,
 				};	
 
 				// Interpolate texture coordinates, dividing by w components
